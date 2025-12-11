@@ -78,6 +78,14 @@ def ast_to_string(ast):
 
     if ast["tag"] == "while":
         s = "while (" + ast_to_string(ast["condition"]) + ") {" + ast_to_string(ast["do"]) + "}"
+        return s
+
+    if ast["tag"] == "for":
+        init_str = ast_to_string(ast["init"]) if ast["init"] is not None else ""
+        cond_str = ast_to_string(ast["condition"]) if ast["condition"] is not None else ""
+        inc_str = ast_to_string(ast["increment"]) if ast["increment"] is not None else ""
+        s = "for (" + init_str + ";" + cond_str + ";" + inc_str + ") {" + ast_to_string(ast["do"]) + "}"
+        return s
 
     if ast["tag"] == "statement_list":
         items = []
@@ -398,6 +406,42 @@ def evaluate(ast, environment):
             condition_value, cond_status = evaluate(ast["condition"], environment)
             if cond_status == "exit": return condition_value, "exit"
         return None, None # Normal loop termination (condition false or break occurred)
+
+    if ast["tag"] == "for":
+        # Create a new scope for the for loop (for init variable)
+        loop_env = environment.copy()
+        
+        # Execute init expression (if present)
+        if ast["init"] is not None:
+            init_val, init_status = evaluate(ast["init"], loop_env)
+            if init_status == "exit": return init_val, "exit"
+        
+        # Loop while condition is true (or no condition means infinite loop)
+        while True:
+            # Evaluate condition (if present, true by default)
+            if ast["condition"] is not None:
+                condition_value, cond_status = evaluate(ast["condition"], loop_env)
+                if cond_status == "exit": return condition_value, "exit"
+                if not is_truthy(condition_value):
+                    break  # Exit loop if condition is false
+            
+            # Execute loop body
+            body_val, body_status = evaluate(ast["do"], loop_env)
+            
+            if body_status == "return" or body_status == "exit":
+                return body_val, body_status  # Propagate critical exits
+            if body_status == "break":
+                break  # Exit the for loop, loop completes normally
+            if body_status == "continue":
+                # Continue to increment (below)
+                pass
+            
+            # Execute increment expression (if present)
+            if ast["increment"] is not None:
+                inc_val, inc_status = evaluate(ast["increment"], loop_env)
+                if inc_status == "exit": return inc_val, "exit"
+        
+        return None, None  # Normal loop termination (condition false or break occurred)
 
     if ast["tag"] == "statement_list":
         last_value = None

@@ -37,6 +37,7 @@ grammar = """
 
     if_statement = "if" "(" expression ")" statement_list [ "else" (if_statement | statement_list) ]
     while_statement = "while" "(" expression ")" statement_list
+    for_statement = "for" "(" [ expression ] ";" [ expression ] ";" [ expression ] ")" statement_list
     statement_list = "{" statement { ";" statement } "}"
     exit_statement = "exit" [ expression ]
     assert_statement = "assert" expression [ "," expression ]
@@ -44,7 +45,7 @@ grammar = """
     break_statement = "break"
     continue_statement = "continue"
 
-    statement = if_statement | while_statement | function_statement | return_statement | print_statement | exit_statement | import_statement | break_statement | continue_statement | assert_statement | expression
+    statement = if_statement | while_statement | for_statement | function_statement | return_statement | print_statement | exit_statement | import_statement | break_statement | continue_statement | assert_statement | expression
 
     program = [ statement { ";" statement } {";"} ]
     """
@@ -947,7 +948,7 @@ def parse_statement_list(tokens):
         statement, tokens = parse_statement(tokens)
         statements.append(statement)
         # we don't need a semicolon terminator after block-terminated statements
-        if statement["tag"] in ["if","while","function"]:     
+        if statement["tag"] in ["if","while","for","function"]:     
             continue
         # we don't need a semicolon terminator after function assignments
         if statement["tag"] == "assign" and statement["value"]["tag"] == "function":
@@ -1083,6 +1084,90 @@ def test_parse_while_statement():
             "statements": [{"tag": "print", "value": {"tag": "number", "value": 1}}],
         },
     }
+
+
+def parse_for_statement(tokens):
+    """
+    for_statement = "for" "(" [ expression ] ";" [ expression ] ";" [ expression ] ")" statement_list
+    """
+    assert tokens[0]["tag"] == "for"
+    tokens = tokens[1:]
+    if tokens[0]["tag"] != "(":
+        raise Exception(f"Expected '(' in for statement: {tokens[0]}")
+    tokens = tokens[1:]
+    
+    # Parse init expression (optional)
+    init = None
+    if tokens[0]["tag"] != ";":
+        init, tokens = parse_expression(tokens)
+    
+    # Expect semicolon
+    assert tokens[0]["tag"] == ";", f"Expected ';' after init in for statement: {tokens[0]}"
+    tokens = tokens[1:]
+    
+    # Parse condition expression (optional)
+    condition = None
+    if tokens[0]["tag"] != ";":
+        condition, tokens = parse_expression(tokens)
+    
+    # Expect semicolon
+    assert tokens[0]["tag"] == ";", f"Expected ';' after condition in for statement: {tokens[0]}"
+    tokens = tokens[1:]
+    
+    # Parse increment expression (optional)
+    increment = None
+    if tokens[0]["tag"] != ")":
+        increment, tokens = parse_expression(tokens)
+    
+    # Expect closing paren
+    assert tokens[0]["tag"] == ")", f"Expected ')' in for statement: {tokens[0]}"
+    tokens = tokens[1:]
+    
+    # Parse body
+    body, tokens = parse_statement_list(tokens)
+    
+    return {
+        "tag": "for",
+        "init": init,
+        "condition": condition,
+        "increment": increment,
+        "do": body
+    }, tokens
+
+
+def test_parse_for_statement():
+    """
+    for_statement = "for" "(" [ expression ] ";" [ expression ] ";" [ expression ] ")" statement_list
+    """
+    print("testing parse_for_statement...")
+    
+    # Simple for loop with all parts
+    ast = parse_for_statement(tokenize("for(i=0;i<10;i=i+1){print i}"))[0]
+    assert ast == {
+        "tag": "for",
+        "init": {"tag": "assign", "target": {"tag": "identifier", "value": "i"}, "value": {"tag": "number", "value": 0}},
+        "condition": {"tag": "<", "left": {"tag": "identifier", "value": "i"}, "right": {"tag": "number", "value": 10}},
+        "increment": {"tag": "assign", "target": {"tag": "identifier", "value": "i"}, "value": {"tag": "+", "left": {"tag": "identifier", "value": "i"}, "right": {"tag": "number", "value": 1}}},
+        "do": {"tag": "statement_list", "statements": [{"tag": "print", "value": {"tag": "identifier", "value": "i"}}]}
+    }
+    
+    # For loop with empty init
+    ast = parse_for_statement(tokenize("for(;i<10;i=i+1){print i}"))[0]
+    assert ast["init"] is None
+    assert ast["condition"] is not None
+    assert ast["increment"] is not None
+    
+    # For loop with empty condition
+    ast = parse_for_statement(tokenize("for(i=0;;i=i+1){print i}"))[0]
+    assert ast["init"] is not None
+    assert ast["condition"] is None
+    assert ast["increment"] is not None
+    
+    # For loop with empty increment
+    ast = parse_for_statement(tokenize("for(i=0;i<10;){print i}"))[0]
+    assert ast["init"] is not None
+    assert ast["condition"] is not None
+    assert ast["increment"] is None
 
 
 def parse_return_statement(tokens):
@@ -1277,7 +1362,7 @@ def test_parse_function_statement():
 
 def parse_statement(tokens):
     """
-    statement = if_statement | while_statement | function_statement | return_statement | print_statement | exit_statement | import_statement | break_statement | continue_statement | assert_statement | expression
+    statement = if_statement | while_statement | for_statement | function_statement | return_statement | print_statement | exit_statement | import_statement | break_statement | continue_statement | assert_statement | expression
     """
     tag = tokens[0]["tag"]
     # note: none of these consumes a token
@@ -1285,6 +1370,8 @@ def parse_statement(tokens):
         return parse_if_statement(tokens)
     if tag == "while":
         return parse_while_statement(tokens)
+    if tag == "for":
+        return parse_for_statement(tokens)
     if tag == "function":
         return parse_function_statement(tokens)
     if tag == "return":
@@ -1306,7 +1393,7 @@ def parse_statement(tokens):
 
 def test_parse_statement():
     """
-    statement = if_statement | while_statement | function_statement | return_statement | print_statement | exit_statement | import_statement | break_statement | continue_statement | assert_statement | expression
+    statement = if_statement | while_statement | for_statement | function_statement | return_statement | print_statement | exit_statement | import_statement | break_statement | continue_statement | assert_statement | expression
     """
     print("testing parse_statement...")
 
@@ -1460,6 +1547,7 @@ if __name__ == "__main__":
         test_parse_statement_list,
         test_parse_if_statement,
         test_parse_while_statement,
+        test_parse_for_statement,
         test_parse_return_statement,
         test_parse_print_statement,
         test_parse_function_statement,
